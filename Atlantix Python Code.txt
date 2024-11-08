@@ -1,0 +1,584 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Feb 28 20:47:37 2022
+
+@author: Administrator
+"""
+# coded on Spyder version 4.2 via the Anaconda Platform on the VM
+# Python 3.8.8
+# IPython 7.22.0 
+# Excel (office 16)
+
+
+import numpy as np # loads a numeric python library for numerical analysis v1.20.1
+import pandas as pd # loads python dataframe analysis library v1.2.4
+import pandas.plotting as pdp # loads the plotting tool that comes with panda (for graphs) v1.2.4
+import matplotlib.pyplot as plt # also used to plot graphs v3.3.4
+from importlib import reload # loads a library that can rectify wrong variable placement (see next line) v3.10.0
+plt=reload(plt) # use this format of code if you have mistakenly given the same object name different values
+import waterfall_chart # used to create waterfall chart v3.8
+from statsmodels.tsa.arima_model import ARIMA # imported to create ARIMA model v0.12.2
+from statsmodels.tsa.stattools import acf # imported to calculate acf differencing v0.12.2
+
+
+
+# Function to load data into python
+def load_data(file):
+    return pd.read_excel(file, index_col = 0)
+
+
+# To load the Files
+AR_File = load_data("C:/Users/Administrator/Desktop/Lifecore Files/Working_AGG_AR_File.xlsx")
+Payment_Terms = load_data("C:/Users/Administrator/Desktop/Lifecore Files\A1.a Payment Terms by Customer.xls")
+Sales = load_data("C:/Users/Administrator/Desktop/Lifecore Files\Sales by Customers.xlsx")
+
+
+
+# EXPLORING AND CLEANING THE DATA
+
+# Checking all the files information
+AR_File.info()
+Payment_Terms.info()
+
+
+
+# Payment Terms Manipulation
+Payment_Terms.info()
+Payment_Terms = Payment_Terms.reset_index()
+Payment_Terms.columns = Payment_Terms.iloc[0]
+PTnew = Payment_Terms.iloc[1:, :]
+PTnew = PTnew.rename(columns = {"Payment Terms (X days from invoice date)" : "PT"})
+PTnew["PT"] = PTnew["PT"].astype(int)
+PTnew.info()
+PTnew.shape
+
+# Sales File Manipulation
+Sales.info()
+Sales_desc = Sales.describe()
+Sales = Sales.reset_index()
+
+# Changing the Invoice Number on Sales file from integer to string
+Sales["Invoice Number"] = Sales["Invoice Number"].astype(str)
+
+# Creating a unique ID with Customer ID and Invoice Number
+Sales["Unique_ID"] = Sales[["Customer ID", "Invoice Number"]].agg('-'.join, axis=1)
+
+# Converting Invoice Date to Date Format
+Sales["Invoice Date"] = pd.to_datetime(Sales["Invoice Date"], format='%y%m%d')
+Sales["InvoiceDate"] = Sales["Invoice Date"].dt.date
+Sales.info()
+Sales_df = Sales[["Customer Name", "Customer ID", "Invoice Number", "Unique_ID", "Invoice Date", "InvoiceDate", "Sales"]]
+Sales_df.info()
+
+# Grouping unique IDs together as one
+Sales_newdf = Sales_df.groupby(
+    by=["Unique_ID", 
+        "Customer Name", 
+        "Customer ID", 
+        "Invoice Number", 
+        "Invoice Date", 
+        "InvoiceDate"], 
+    as_index=False)["Sales"].agg("sum") 
+Sales_newdf.info()
+Sales_newdf.shape
+
+
+# Merging PT and Sales on Customer ID
+SalesPT = Sales_newdf.merge(PTnew, on=["Customer ID"])
+SalesPT.info()
+SalesPT.shape
+
+# Calculating Expected Payment Date (EPD)
+EPD = SalesPT['PT'].apply(np.ceil).apply(lambda x: pd.Timedelta(x, unit='D'))
+SalesPT["EPD"] = SalesPT['Invoice Date'] + EPD
+SalesPT["ExpPayDate"] = SalesPT["EPD"].dt.date
+
+
+# Saving the merged Sales PT file with the Expected Payment Date
+SalesPT_df = SalesPT
+SalesPT_df.shape
+
+
+# AR File Manipulation
+AR_File = AR_File.reset_index()
+AR_File.info()
+AR_File["INV_NO"] = AR_File["INV_NO"].fillna("0")
+AR_File["CUSTOMER"] = AR_File["CUSTOMER"].fillna("0")
+AR_File["PAYMENT_AMOUNT"] = AR_File["PAYMENT_AMOUNT"].fillna(0)
+AR_File["TOTAL_AR"] = AR_File["TOTAL_AR"].fillna(0)
+AR_File["INV_NO"] = AR_File["INV_NO"].astype(str)
+
+# Creating a unique ID with Customer ID and Invoice Number
+AR_File["Unique_ID"] = AR_File[["CUSTOMER", "INV_NO"]].agg('-'.join, axis=1)
+AR_File.info()
+len(AR_File)
+len(pd.unique(AR_File["Unique_ID"]))
+AR_duplID= AR_File[AR_File["Unique_ID"].duplicated()].sort_values(by = "Unique_ID", axis = 0)
+ARdupID_count = AR_File.groupby("Unique_ID").count()
+ARdupID_count = pd.DataFrame(AR_File["Unique_ID"].value_counts())
+ARdupID_count= ARdupID_count[ARdupID_count["Unique_ID"] > 1]
+
+# Creating a new AR file
+AR_df = AR_File[["NAME", "CUSTOMER", "INV_NO", "Unique_ID", "TOTAL_AR", "PAYMENT_AMOUNT", "PAYMENT_DATE", "DATE"]]
+AR_df = AR_df.rename(columns = {"DATE":"AR_Date"})
+len(AR_df)
+len(pd.unique(AR_df["Unique_ID"]))
+ARdfdupID_count =  AR_df[AR_df["Unique_ID"].duplicated()].sort_values(by = "Unique_ID", axis = 0)
+
+
+# Merging the new AR file (AR_df) and the SalesPT files on Unique_ID
+SalesAR_PT =  SalesPT_df.merge(AR_df, on=["Unique_ID"])
+SalesAR_PT.info()
+CheckNA = SalesAR_PT.isnull().any() #checking again to be sure there are no null values
+
+# Removing repeated column in the merged (SalesAR_PT) dataframe
+SalesAR_PT = SalesAR_PT.drop(["Customer Name_y", "NAME", "CUSTOMER", "INV_NO"], axis = 1)
+SalesAR_PT.info()
+
+# Calculating late payments
+SalesAR_PT["Early/Late Payment"] = SalesAR_PT["PAYMENT_DATE"] - SalesAR_PT["EPD"]
+SalesAR_PT["Early/Late Payment Days"] = SalesAR_PT["Early/Late Payment"].dt.days
+# positive value means early payment, negative value means late payment
+
+# Calculating Payment Balance (Or discounts)
+SalesAR_PT["Payment Discounts"] = SalesAR_PT["TOTAL_AR"] - SalesAR_PT["PAYMENT_AMOUNT"]
+
+# Converting Payment date to date only (no time)
+SalesAR_PT["Payment_Date"] = SalesAR_PT['PAYMENT_DATE'].dt.date
+
+# Saving a copy of the file
+SalesRev = SalesAR_PT
+SalesRev.info()
+SalesRev.describe()
+SalesRev.shape
+
+"""We need the actual payment dates and 
+the cash received so far for additional computation"""
+
+# Plotting the three observed values
+a = SalesRev.iloc[:,6] ## Sales (to be paid)
+b = SalesRev.iloc[:,10] ## AR (to be received per the terms)
+c = SalesRev.iloc[:,11] ## Actual Payment
+d = SalesRev.iloc[:,16] ## Discounts
+
+fig, figax = plt.subplots(figsize = (14,10))
+figax.hist(a, bins = 60, rwidth = 0.9) 
+figax.hist(b, bins = 60,  rwidth = 0.9) 
+figax.hist(c,bins = 60, rwidth = 0.9) 
+figax.hist(d, bins = 60, rwidth = 0.9) 
+figax.legend(["Sales", "TOTAL_AR", "Payment Amount", "Discounts"])
+
+
+# Checking Correlation of how the amounts (excluding discounts) correlate with other data
+corr_matrix = SalesRev.corr()
+corr_matrix["PAYMENT_AMOUNT"].sort_values(ascending=False)
+corr_matrix["Sales"].sort_values(ascending=False)
+corr_matrix["TOTAL_AR"].sort_values(ascending=False)
+# Total_AR, Payment Amount, Sales and Payment Balance are highly correlated.
+# Customers who default in payment are likely to continue to default in payment
+
+# Plotting a scatter matrix of the attributes
+attributes = ["TOTAL_AR", "PAYMENT_AMOUNT", "Sales",
+              "Payment Discounts" , "PT", "Early/Late Payment Days"]
+pdp.scatter_matrix(
+    SalesRev[attributes], figsize=(15, 10), 
+    color='#00688B', hist_kwds={'color':['#ADD8E6']})
+# Total AR is most correlated with Payment Amount and then Sales.
+# We can use Payment Amount to do our predictions for what customers will pay
+
+# Checking for early or late payments on the payment terms
+plt.figure()
+SalesRev.plot(kind="scatter", x="Early/Late Payment Days", y="PT",
+    s=SalesRev["PAYMENT_AMOUNT"]/1000, label="PAYMENT_AMOUNT", figsize=(10,7),
+    c="Payment Discounts", cmap=plt.get_cmap("jet"), colorbar=True,
+    sharex=False)
+plt.legend()
+# Those with 60 days payment terms default more and owe more.
+# Those with 45 days payment terms have relatively low payment balance with a major outlier of late payment at 10 days
+# Those with 30 days payment terms also have some defaulters with some high amounts of money
+
+SalesRev.info()
+
+# Creating a payment date column - PD and Expected Payment Date - EPD2 that is an integer column
+SalesRev["PD"]= SalesRev["PAYMENT_DATE"].dt.strftime("%Y%m%d").astype(int)
+SalesRev["EPD2"]= SalesRev["EPD"].dt.strftime("%Y%m%d").astype(int)
+
+# Plotting Payment Amount by Payment Date
+SalesRev = SalesRev.sort_values(by = "PAYMENT_DATE")
+paydate = SalesRev["PAYMENT_DATE"]
+pa = SalesRev["PAYMENT_AMOUNT"]
+plt.figure(figsize=(40, 8), dpi=80)
+plt.bar(paydate,pa, width = 2)
+plt.title("Payment Amount over FY2021")
+plt.ylabel("Payment Amount in $million")
+plt.xlabel("Payment Date")
+
+
+# Grouping by payment
+SalesRevgroup = SalesRev.groupby(
+    by=['Unique_ID', 'Customer Name_x', 'Customer ID', 'Invoice Number',
+       'Invoice Date', 'InvoiceDate', 'Sales', 'PT', 'EPD', 'ExpPayDate',
+       'TOTAL_AR', 'PAYMENT_AMOUNT', 'PAYMENT_DATE', 'AR_Date',
+       'Early/Late Payment Days', 'Payment Discounts',
+       'Payment_Date', 'PD', 'EPD2'], 
+    as_index=False)["PAYMENT_AMOUNT", 'Early/Late Payment Days'].agg("sum")
+
+SalesRev2 = SalesRevgroup.drop_duplicates(subset='Invoice Number', keep='first')
+SalesRev3 = SalesRev2.drop_duplicates(subset='Customer Name_x', keep='first')
+SalesRev3 = SalesRev3.sort_values(by=['AR_Date'])
+
+# Plotting Customer Name by Total AR
+cn = SalesRev3["Customer Name_x"]
+ta = SalesRev3["TOTAL_AR"]
+plt.figure(figsize=(40, 8), dpi=80)
+plt.bar(cn,ta, width = 2)
+plt.title("Customer vs Total Account Receivable")
+plt.ylabel("Total AR (in $ million)")
+plt.xlabel("Customer Name")
+plt.xticks(rotation = 90)
+
+# Plotting Customer Name byPayment
+cn = SalesRev["Customer Name_x"]
+pa = SalesRev["PAYMENT_AMOUNT"]
+plt.figure(figsize=(40, 8), dpi=80)
+plt.bar(cn,pa, width = 2)
+plt.title("Customer vs Total Payment Amount")
+plt.ylabel("Total Payment (in million)")
+plt.xlabel("Customer Name")
+plt.xticks(rotation = 90)
+
+
+
+#Sorting by Invoice Numbers
+SalesRevModel = SalesRev2.sort_values(by=['Invoice Date']).reset_index()
+SalesRevModel2 = SalesRevModel
+
+#TOP10 Customer that pay late
+SalesRevModel.info()
+top10cus =SalesRevModel2.groupby("Customer Name_x").aggregate(sum)
+top10cus.reset_index(inplace=True)
+top10cus_late = top10cus.nlargest(n=10, columns=['Early/Late Payment Days'])
+top10cus_late = top10cus_late.sort_values(by = 'Early/Late Payment Days', ascending = True)
+y =  top10cus_late['Early/Late Payment Days']
+x =  top10cus_late['Customer Name_x']
+plt.barh(x,y)
+plt.ylabel("Customer Name")
+plt.xlabel('Past Due Days')
+plt.title("Top 10 customers that pay late")
+plt.xlim([0, 15])
+plt.show()
+
+#TOP10 Customer that pay late payment amount
+#top10cus_late2 = top10cus_late.sort_values(by = 'PAYMENT_AMOUNT', ascending = True)
+y_1 =  top10cus_late['PAYMENT_AMOUNT']
+x_1 =  top10cus_late['Customer Name_x']
+plt.barh(x_1,y_1)
+plt.ylabel("Customer Name")
+plt.xlabel('Total payment amount in $ 10millions')
+plt.title("Top 10 customers that pay late and their total payment amount")
+#plt.xlim([0, 15])
+plt.show()
+
+
+
+#TOP10 Customer that get more discount
+top10cus_discount = top10cus.nlargest(n=10, columns=['Payment Discounts'])
+top10cus_discount = top10cus_discount.sort_values(by = 'Payment Discounts', ascending = True)
+y2 =  top10cus_discount['Payment Discounts']
+x2 =  top10cus_discount['Customer Name_x']
+plt.barh(x2,y2)
+plt.ylabel("Customer Name")
+plt.xlabel('Discounts or Payment Balance in $ millions')
+plt.title("Top 10 customers that get more discounts")
+plt.show()
+
+#TOP10 Customer's PAYMENT_AMOUNT
+top10cus_large = top10cus.nlargest(n=10, columns=['PAYMENT_AMOUNT'])
+top10cus_large = top10cus_large.sort_values(by = 'PAYMENT_AMOUNT', ascending = True)
+x1 =  top10cus_large['Customer Name_x']
+y1 =  top10cus_large['PAYMENT_AMOUNT']
+plt.figure()
+plt.barh(x1,y1)
+plt.ylabel("Customer Name")
+plt.xlabel('Payment amount in $ millions')
+plt.title("Top 10 customers with high payment")
+plt.show()
+
+
+#Least10 Customer's PAYMENT_AMOUNT
+top10cus_small = top10cus.nsmallest(n=10, columns=['PAYMENT_AMOUNT'])
+top10cus_small = top10cus_small.sort_values(by = 'PAYMENT_AMOUNT', ascending = True)
+x3 =  top10cus_small['Customer Name_x']
+y3 =  top10cus_small['PAYMENT_AMOUNT']
+plt.figure()
+plt.barh(x3,y3)
+plt.ylabel("Customer Name")
+plt.xlabel('Payment amount in $')
+plt.title("Top 10 customers with the smallest payment amount")
+plt.show()
+
+#plt.xticks(rotation = 90)
+
+
+print(SalesRevModel.head(10))
+
+print(SalesRevModel.size)
+
+print(SalesRevModel.describe())
+
+
+
+#Negative Value is an early payment & a postive value is a late payment 
+
+#Makes and saves 173 graphs for each company
+CompanyList = SalesRevModel2['Customer Name_x'].unique()
+for CompanyID in range(len(CompanyList)):
+   
+   SelectedCompany = SalesRevModel2[SalesRevModel2['Customer Name_x']==CompanyList[CompanyID]]
+   #for all days use 'SalesRevModel2' for days that only exist for each company use 'SelectedCompany'
+   dayList = SalesRevModel2['Early/Late Payment Days'].unique()
+   InvoiceVals=SelectedCompany['PAYMENT_AMOUNT']
+   sumValsbyDay=[]
+   dayVals=[]
+
+   for daynum in dayList:
+       sumValsbyDay.append([daynum,(InvoiceVals[SelectedCompany['Early/Late Payment Days']==daynum]).mean()])
+    
+   SumbyDaysLate = pd.DataFrame(sumValsbyDay, columns=['Day Late/Early','Total Value of Invoices'])
+
+ 
+   fig, figax = plt.subplots(figsize = (7,5))
+   plt.bar(SumbyDaysLate['Day Late/Early'],SumbyDaysLate['Total Value of Invoices'])
+   plt.ylabel('Total Dollar Amount of Invoices')
+   #plt.xlabel('Early/Late Payment Days')
+   plt.xlabel('Early  <--------------------               Payment Timelines               --------------------> Late')
+   
+   
+   figax.yaxis.set_major_formatter('${x:1.0f}')
+   plt.axvline(x=0, color='red')
+   CompanyName=CompanyList[CompanyID]
+   CompanyName=CompanyName.replace("/","")
+   CompanyName=CompanyName.replace(".","")
+   plt.title('Histogram of late/early payments for '+str(CompanyName))
+   fig.savefig('C:/Users/Administrator/Pictures/CompanybyInvoiceDollarAmount/'+str(CompanyName)+'_Values.png')
+
+
+### CODE FOR COMPANY FREQUENCY OF PAYMENT
+#Makes and saves 173 graphs for each company and saves to the specified file path
+CompanyList = SalesRevModel2['Customer Name_x'].unique()
+CompanyStats=[]
+for CompanyID in range(len(CompanyList)):
+    CompanyList = SalesRevModel2['Customer Name_x'].unique()
+    SelectedCompany = SalesRevModel2[SalesRevModel2['Customer Name_x']==CompanyList[CompanyID]]
+    fig, figax = plt.subplots(figsize = (7,5))
+    figax.hist(SelectedCompany['Early/Late Payment Days'])
+
+    CompanyValues=SelectedCompany['Early/Late Payment Days'].describe()
+
+    CompanyStats.append([CompanyList[CompanyID],
+                         CompanyValues[0],CompanyValues[1],CompanyValues[2],CompanyValues[3],
+                         CompanyValues[4],CompanyValues[5],CompanyValues[6],CompanyValues[7]])
+
+    plt.ylabel('Frequency of Payments')
+    plt.xlabel('Early  <------------------               Payment Timelines               -----------------> Late')
+    plt.axvline(x=0, color='red')
+    plt.text(0.15,10,'Invoice Date',rotation=90, color='red')
+    plt.axvline(x=CompanyValues[1], color='blue')
+    plt.text(CompanyValues[1]-.5,10,'Median Payment Date',rotation=90, color='blue')
+    plt.ylim((0,40))
+    plt.xlim((-8,8))
+    CompanyName=CompanyList[CompanyID]
+    CompanyName=CompanyName.replace("/","")
+    CompanyName=CompanyName.replace(".","")
+    plt.title('Frequency of late/early payments for '+str(CompanyName))
+    fig.savefig('C:/Users/Administrator/Pictures/CompanyLateEarlyHistograms/'+str(CompanyName)+'.png')
+    if CompanyValues[0] > 1:
+        fig.savefig('C:/Users/Administrator/Pictures/moreThanOne/'+str(CompanyName)+'.png')
+    
+CompanyFrame=pd.DataFrame(CompanyStats, columns=['Company Name','Count','Mean','Std','Min','25%','50%','75%','Max'])
+
+### COMPANY SCORE - BEST AND WORST PERFORMING COMPANIES
+earlyWeight=1
+lateWeight=5
+CompanyRecord=[]
+for CompanyID in range(len(CompanyList)):
+    CompanyScore =0
+    CompanyList = SalesRevModel2['Customer Name_x'].unique()
+    SelectedCompany = SalesRevModel2[SalesRevModel2['Customer Name_x']==CompanyList[CompanyID]]
+    for rowNum in range(len(SelectedCompany)):
+        if SelectedCompany.iloc[0,19] > 0:
+            CompanyScore += SelectedCompany.iloc[0,11]*earlyWeight
+        elif SelectedCompany.iloc[0,19] < 0:
+            CompanyScore -= SelectedCompany.iloc[0,11]*lateWeight
+        elif SelectedCompany.iloc[0,19] == 0:
+            CompanyScore += SelectedCompany.iloc[0,11]
+    CompanyRecord.append([CompanyList[CompanyID],CompanyScore])
+CompanyRecord = pd.DataFrame(CompanyRecord, columns=['Company Name','Company Score'])
+
+print("The most on-time company is")
+CompanyRecord.loc[CompanyRecord['Company Score']==CompanyRecord['Company Score'].max()]
+print("The company that has the worst payment record is")
+CompanyRecord.loc[CompanyRecord['Company Score']==CompanyRecord['Company Score'].min()]
+
+
+
+
+# Aggregated weekly payment amount
+SalesRevModel2 = SalesRevModel
+SalesRevModel2.columns
+# Export to excel to do a check
+SalesRevModel2.to_excel("SalesRev.xlsx")
+SalesRevModel2_freqtest = SalesRevModel2.groupby(
+    by=['PAYMENT_DATE']).PAYMENT_AMOUNT.sum()
+Salesweekly =  (SalesRevModel2_freqtest.resample('W').sum())
+
+
+
+# *****THE MODEL ******#
+
+#*** Sales Weekly Data for Lifecore
+Salesmodel = Salesweekly.to_frame()
+
+
+# Splitting the Salesmodel (Salesweekly) dataset into train and test sets
+Salesmodel_train = Salesmodel[:'2021-11-28']
+Salesmodel_train.loc[:,"PAYMENT_AMOUNT"] = Salesmodel_train.loc[:,"PAYMENT_AMOUNT"].round(2)
+
+# USE THIS PLOT IF YOU WANT THE DATA LABELS TO SHOW
+# Salesmodel_train.plot(figsize = (25,10), 
+#                       title = "Lifecore Weekly Cash Receipts",
+#                       xlabel = "Months",
+#                       ylabel = "Payment amount (in $ millions)")
+# for i,j in Salesmodel_train.PAYMENT_AMOUNT.items():
+#     plt.annotate(str(j), xy=(i, j))
+# plt.show()
+
+
+Salesmodel_test  = Salesmodel['2021-10-03':]
+
+
+
+# order = (p=1, d=1, q=1) 503 / 501
+model1 = ARIMA(Salesmodel_train, order = (5,0,3))  
+#model1 = ARIMA(Salesmodel_train, order = (12,0,14))  
+model1_fit  = model1.fit()  
+start_params = model1_fit.params
+print(model1_fit.summary())
+model1_fit.aic
+
+
+#axes.formatter.useoffset
+# Forecast: 25 forecasting values with 95% confidence
+fc, se, conf = model1_fit.forecast(21, alpha=0.05)
+# Make as pandas series
+fc_series = pd.Series(fc, index=Salesmodel_test.index)
+lower_series = pd.Series(conf[:, 0], index=Salesmodel_test.index)
+upper_series = pd.Series(conf[:, 1], index=Salesmodel_test.index)
+
+
+
+# Plot forecasting graph
+plt.figure(figsize=(12,5), dpi=100)
+plt.plot(Salesmodel_train, label='training')
+plt.plot(Salesmodel_test, label='actual')
+plt.plot(fc_series, label='forecast')
+#ax = plt.gca
+plt.fill_between(lower_series.index, lower_series, upper_series, 
+                 color='k', alpha=.15)
+plt.title('Forecast vs Actuals')
+plt.legend(loc='upper left', fontsize=8)
+plt.gcf().autofmt_xdate(rotation=90)
+plt.ylabel("Cash Receipts in $ millions")
+plt.xlabel("Date (Year - Month)")
+plt.ylim((0,5000000))
+plt.show()
+
+
+compare = pd.DataFrame(['fc_series',])
+
+
+
+
+
+# EITHER MAKE A WATERFALL CHART HERE OR ON EXCEL
+#Waterfall Chart on Forecasted Values
+waterfall_data=pd.DataFrame(fc_series)
+waterfall_data.index = waterfall_data.index.strftime("%Y-%m-%d")
+deltas=[]
+for i in range(len(waterfall_data)):
+    if i == 0:
+        deltas.append(waterfall_data[0][i])
+    else:
+        deltas.append(waterfall_data[0][i]-waterfall_data[0][i-1])
+waterfall_data['delta']=deltas
+waterfall_chart.plot(waterfall_data.index, waterfall_data['delta'],rotation_value=90, formatting="$ {:,.0f}",)
+
+
+
+
+
+###CAREFUL NOT TO RUN @ 15 WILL TAKE 2 HOURS TO FINISH!!!
+import warnings
+warnings.filterwarnings("ignore")
+
+model_values=[]
+model_num=0
+best_model_score=0
+best_model_params=[]
+for a in range(0,15):
+    for b in range(0,15):
+        for c in range(0,15):
+            try:
+                model_num += 1
+                print("Model Number: "+str(model_num)+" with a="+str(a)+" b="+str(b)+" c="+str(c))
+                model1 = ARIMA(Salesmodel_train, order = (a,b,c))  
+                model1_fit  = model1.fit()
+                fc, se, conf = model1_fit.forecast(21, alpha=0.05)
+                acc_vals=forecast_accuracy(fc, Salesmodel_test["PAYMENT_AMOUNT"])
+
+                model_values.append([a,b,c,model1_fit.aic, acc_vals["mape"]])
+            except:
+                print("AN EXCEPTION OCCURED")
+model_values = pd.DataFrame(model_values, columns=['p','d','q','aic','mape'])
+model_values['aic'].idxmin()
+
+under100mape = model_values[model_values['mape'] < 90]
+
+
+def forecast_accuracy(forecast, actual):
+    mape = np.mean(np.abs(forecast - actual)/np.abs(actual))*100  # MAPE
+    me = np.mean(forecast - actual)             # ME
+    mae = np.mean(np.abs(forecast - actual))    # MAE
+    mpe = np.mean((forecast - actual)/actual)   # MPE
+    rmse = np.mean((forecast - actual)**2)**.5  # RMSE
+    corr = np.corrcoef(forecast, actual)[0,1]   # corr
+    mins = np.amin(np.hstack([forecast[:,None], 
+                              actual[:,None]]), axis=1)
+    maxs = np.amax(np.hstack([forecast[:,None], 
+                              actual[:,None]]), axis=1)
+    minmax = 1 - np.mean(mins/maxs)             # minmax
+    acf1 = acf(fc-Salesmodel_test["PAYMENT_AMOUNT"])[1]                      # ACF1
+    return({'mape':mape, 'me':me, 'mae': mae, 
+            'mpe': mpe, 'rmse':rmse, 'acf1':acf1, 
+            'corr':corr, 'minmax':minmax})
+
+forecast_accuracy(fc, Salesmodel_test["PAYMENT_AMOUNT"])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
