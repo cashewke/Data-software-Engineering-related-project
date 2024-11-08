@@ -7,7 +7,7 @@ There are 4 projects in this repository:
 
 This is a project building the bank management database from scratch using sql. The pptx emphasize the database designing process, like the logical schema (ER-diagram), the physical data model after normalization (1st, 2nd and 3rd normal form), and some demo application of the database. The sql document shows the codes.
 
-2.Thyroid Ultrasound project, related file:Thyroid Ultrasound project.ipynb.
+2. Thyroid Ultrasound project, related file:Thyroid Ultrasound project.ipynb.
 
 This is a project analyzing the EHR data using python, emphasizing the data cleaning and statistical modeling process, with the cohort of the patients who get a Thyroid ultrasound done from 2015 to 2022. 
 The main part include:
