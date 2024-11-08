@@ -30,7 +30,5 @@ The outcomes are presented into tables and graphs, and are reported in word docu
 
 This is a project analyzing cash receipts data using python. The pptx emphasize the data cleaning steps, including generated synthetic data for the missing variables, and the model result of the Time-Series Model (ARIMA) in machine learning. The txt document shows the codes.
 
-5. dat
-
 
 
