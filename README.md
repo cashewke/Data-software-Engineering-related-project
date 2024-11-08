@@ -30,5 +30,6 @@ The outcomes are presented into tables and graphs, and are reported in word docu
 
 This is a project analyzing cash receipts data using python. The pptx emphasize the data cleaning steps, including generated synthetic data for the missing variables, and the model result of the Time-Series Model (ARIMA) in machine learning. The txt document shows the codes.
 
-
+4. Yelp crawling and sentiment analysis, related file:
+This is a project to extract review data of the resturant from yelp.com using python, and transforming data into python dataframe and using NLP tools to analyze the sentiment of each review(positive/ negative/ neutral). The csv file shows the data results and the ipynb file shows the codes.
 
