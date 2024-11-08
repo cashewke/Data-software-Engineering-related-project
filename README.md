@@ -12,24 +12,25 @@ This is a project building the bank management database from scratch using sql. 
 This is a project analyzing the EHR data using python, emphasizing the data cleaning and statistical modeling process, with the cohort of the patients who get a Thyroid ultrasound done from 2015 to 2022. 
 The main part include:
 
-a)Report the counts for the cohorts + 7.Descriptive analysis for the cohort (Exploratory Data Analysis)
+a) Report the counts for the cohorts + 7.Descriptive analysis for the cohort (Exploratory Data Analysis)
 
-b)Define the outcome variables in the regression and logistic model
+b) Define the outcome variables in the regression and logistic model
 
-c)Calculte the derivative predictors, like Geocoded social determinants of health (SVI), Charlson comorbidity index etc.
+c) Calculte the derivative predictors, like Geocoded social determinants of health (SVI), Charlson comorbidity index etc.
 
-d)Conduct the Time to event analysis
+d) Conduct the Time to event analysis
 
-e)Build the logistic model
+e) Build the logistic model
 
-f)Build the Linear regression model
+f) Build the Linear regression model
 
 The outcomes are presented into tables and graphs, and are reported in word documents. 
 
 3. Atlantix Partners Revenue Forecast, related file: Atlantix Python Code.txt, Atlantix Partners Revenue Forecast.pptx
+
 This is a project analyzing cash receipts data using python. The pptx emphasize the data cleaning steps, including generated synthetic data for the missing variables, and the model result of the Time-Series Model (ARIMA) in machine learning. The txt document shows the codes.
 
-4. dat
+5. dat
 
 
 
