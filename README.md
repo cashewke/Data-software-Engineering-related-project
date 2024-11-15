@@ -16,3 +16,4 @@ This is a project analyzing cash receipts data using python. The pptx emphasize 
 This is a project extracting review data of the resturants' from yelp.com using python, transforming data into python dataframe and using NLP tools to analyze the sentiment of each review (positive/ negative/ neutral). The csv file shows the data results and the ipynb file shows the codes.
 
 4. Jenkins Continuous Integration project
+   This is a Jenkins project that leverages Docker as an agent and implements Continuous Integration workflows. There are 3 stages in this workflow: Checkout SCM, Build and Test. The workflow will Get contextual object from internal APIs, Checks if running on a Unix-like node and then npm will run the build.
